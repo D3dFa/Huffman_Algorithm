@@ -32,14 +32,21 @@ def build_huffman_tree(frequency):
         heapq.heappush(heap, merged)
     return heap[0]
 
-def build_codes(node, prefix="", codebook=None):
-    if codebook is None:
-        codebook = {}
-    if node is not None:
+def build_codes_iterative(root):
+    """Итеративное построение кодов Хаффмана."""
+    codebook = {}
+    if root is None:
+        return codebook
+    stack = [(root, "")]
+    while stack:
+        node, prefix = stack.pop()
         if node.char is not None:
             codebook[node.char] = prefix or "0"  # Обработка случая одного символа
-        build_codes(node.left, prefix + "0", codebook)
-        build_codes(node.right, prefix + "1", codebook)
+        else:
+            if node.right:
+                stack.append((node.right, prefix + "1"))
+            if node.left:
+                stack.append((node.left, prefix + "0"))
     return codebook
 
 def encode(text, codebook):
@@ -55,42 +62,62 @@ def decode(encoded_bits, root):
             node = root
     return ''.join(decoded)
 
-def serialize_tree(node):
-    """Сериализует дерево в префиксном порядке с использованием '1' для листьев и '0' для внутренних узлов.
-    Возвращает байтовую строку."""
+def serialize_tree_iterative(root):
+    """Итеративная сериализация дерева в префиксном порядке."""
     bits = []
-    def _serialize(node):
-        if node is None:
-            return
+    stack = [root]
+    while stack:
+        node = stack.pop()
         if node.char is not None:
             bits.append('1')
             char_bits = format(ord(node.char), '08b')
             bits.extend(char_bits)
         else:
             bits.append('0')
-            _serialize(node.left)
-            _serialize(node.right)
-    _serialize(node)
+            # Push right first so that left is processed first
+            if node.right:
+                stack.append(node.right)
+            if node.left:
+                stack.append(node.left)
     bit_string = ''.join(bits)
     return bit_string_to_bytes(bit_string)
 
-def deserialize_tree(bit_bytes):
-    """Десериализует дерево из байтовой строки.
-    Возвращает корень дерева."""
+def deserialize_tree_iterative(bit_bytes):
+    """Итеративная десериализация дерева из байтовой строки."""
     bit_string = bytes_to_bit_string(bit_bytes)
-    def _deserialize(it):
-        try:
+    it = iter(bit_string)
+    stack = []
+    root = None
+    try:
+        while True:
             bit = next(it)
-        except StopIteration:
-            return None
-        if bit == '1':
-            char_bits = ''.join(next(it) for _ in range(8))
-            return Node(0, chr(int(char_bits, 2)))
-        else:
-            left = _deserialize(it)
-            right = _deserialize(it)
-            return Node(0, None, left, right)
-    return _deserialize(iter(bit_string))
+            if bit == '1':
+                char_bits = ''.join(next(it) for _ in range(8))
+                leaf = Node(0, chr(int(char_bits, 2)))
+                if not stack:
+                    root = leaf
+                else:
+                    parent = stack[-1]
+                    if parent.left is None:
+                        parent.left = leaf
+                    elif parent.right is None:
+                        parent.right = leaf
+                        stack.pop()  # Node now has both children
+            else:  # bit == '0'
+                internal = Node(0, None)
+                if not stack:
+                    root = internal
+                else:
+                    parent = stack[-1]
+                    if parent.left is None:
+                        parent.left = internal
+                    elif parent.right is None:
+                        parent.right = internal
+                        stack.pop()
+                stack.append(internal)
+    except StopIteration:
+        pass
+    return root
 
 def bit_string_to_bytes(s):
     """Преобразует строку битов в байты."""
@@ -146,15 +173,20 @@ def display_codes(codebook):
             display_char = repr(char)
         print(f"{display_char}: {code}")
 
-def display_tree(node, prefix=''):
-    """Рекурсивный вывод дерева Хаффмана."""
-    if node is not None:
+def display_tree_iterative(root):
+    """Итеративный вывод дерева Хаффмана."""
+    stack = [(root, '')]
+    while stack:
+        node, prefix = stack.pop()
         if node.char is not None:
             print(f"{prefix}Leaf: {repr(node.char)}")
         else:
             print(f"{prefix}Node:")
-            display_tree(node.left, prefix + " 0-")
-            display_tree(node.right, prefix + " 1-")
+            # Push right first so that left is processed first
+            if node.right:
+                stack.append((node.right, prefix + " 1-"))
+            if node.left:
+                stack.append((node.left, prefix + " 0-"))
 
 def encode_file(input_file, output_file, display=False, display_tree_flag=False):
     with open(input_file, 'r', encoding='ascii') as f:
@@ -164,26 +196,26 @@ def encode_file(input_file, output_file, display=False, display_tree_flag=False)
     if tree is None:
         print("Входной файл пуст.")
         return
-    codebook = build_codes(tree)
+    codebook = build_codes_iterative(tree)
     encoded_bit_string = encode(text, codebook)
     encoded_bits = bit_string_to_bytes(encoded_bit_string)
-    tree_bits = serialize_tree(tree)
+    tree_bits = serialize_tree_iterative(tree)
     save_encoded_file(encoded_bits, tree_bits, output_file)
     if display:
         display_codes(codebook)
     if display_tree_flag:
         print("Дерево Хаффмана:")
-        display_tree(tree)
+        display_tree_iterative(tree)
 
 def decode_file(input_file, output_file, display=False, display_tree_flag=False):
     tree_bits, encoded_bits = load_encoded_file(input_file)
-    tree = deserialize_tree(tree_bits)
+    tree = deserialize_tree_iterative(tree_bits)
     if tree is None:
         print("Входной файл не содержит данных для декодирования.")
         return
     if display_tree_flag:
         print("Дерево Хаффмана:")
-        display_tree(tree)
+        display_tree_iterative(tree)
     encoded_bit_string = bytes_to_bit_string(encoded_bits)
     decoded_text = decode(encoded_bit_string, tree)
     with open(output_file, 'w', encoding='ascii') as f:
